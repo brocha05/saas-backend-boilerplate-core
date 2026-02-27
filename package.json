@@ -1,8 +1,8 @@
 {
-  "name": "boilerplate-backend",
+  "name": "boilerplate-backend-core",
   "version": "0.0.1",
-  "description": "",
-  "author": "",
+  "description": "Core backend for the Boilerplate SaaS application",
+  "author": "Jorge Dávalos Bailón",
   "private": true,
   "license": "UNLICENSED",
   "scripts": {
