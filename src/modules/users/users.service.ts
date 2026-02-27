@@ -3,12 +3,20 @@ import {
   NotFoundException,
   ConflictException,
   ForbiddenException,
+  UnauthorizedException,
   Logger,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
-import { CreateUserDto, UpdateUserDto, UserResponseDto } from './dto';
+import { CacheService } from '../../infrastructure/cache/cache.service';
+import {
+  CreateUserDto,
+  UpdateUserDto,
+  UserResponseDto,
+  UpdateProfileDto,
+  DeleteAccountDto,
+} from './dto';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import { User } from '@prisma/client';
 import {
@@ -24,6 +32,8 @@ export interface PaginatedUsers {
   pages: number;
 }
 
+const USER_PROFILE_TTL = 300; // 5 minutes
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
@@ -31,6 +41,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly cache: CacheService,
   ) {}
 
   async findAll(
@@ -98,6 +109,8 @@ export class UsersService {
       data: dto,
     });
 
+    await this.cache.del(`user:${id}`);
+
     return UserResponseDto.fromEntity(updated);
   }
 
@@ -116,6 +129,67 @@ export class UsersService {
       where: { id },
       data: { deletedAt: new Date(), isActive: false },
     });
+
+    await this.cache.del(`user:${id}`);
+  }
+
+  // ─── Self-service profile ──────────────────────────────────────────────────
+
+  async getMyProfile(userId: string): Promise<UserResponseDto> {
+    const cacheKey = `user:${userId}`;
+    const cached = await this.cache.get<User>(cacheKey);
+    if (cached) return UserResponseDto.fromEntity(cached);
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    await this.cache.set(cacheKey, user, USER_PROFILE_TTL);
+    return UserResponseDto.fromEntity(user);
+  }
+
+  async updateMyProfile(
+    userId: string,
+    dto: UpdateProfileDto,
+  ): Promise<UserResponseDto> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId, deletedAt: null },
+    });
+    if (!user) throw new NotFoundException('User not found');
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: dto,
+    });
+
+    await this.cache.del(`user:${userId}`);
+
+    return UserResponseDto.fromEntity(updated);
+  }
+
+  async deleteMyAccount(userId: string, dto: DeleteAccountDto): Promise<void> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.deletedAt) throw new NotFoundException('User not found');
+
+    const valid = await bcrypt.compare(dto.password, user.password);
+    if (!valid) throw new UnauthorizedException('Password is incorrect');
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { deletedAt: new Date(), isActive: false },
+      }),
+      // Revoke all sessions
+      this.prisma.refreshToken.updateMany({
+        where: { userId },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    await this.cache.del(`user:${userId}`);
+
+    this.logger.log(`User ${userId} deleted their own account`);
   }
 
   async resendInvite(
@@ -137,6 +211,7 @@ export class UsersService {
     notifEvent.inviterName = requester
       ? `${requester.firstName} ${requester.lastName}`
       : 'A team member';
+    // No inviteToken — user already exists, email directs to login
     this.eventEmitter.emit(NotificationEvent.USER_INVITED, notifEvent);
 
     this.logger.log(`Resend invite for user: ${user.email}`);

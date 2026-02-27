@@ -55,6 +55,8 @@ export class UserInvitedEvent {
   companyName: string;
   /** Full name of the person sending the invite */
   inviterName: string;
+  /** Raw hex token — embed in accept-invite link. Omit when user already exists. */
+  inviteToken?: string;
 }
 
 export class SubscriptionActivatedEvent {

@@ -2,10 +2,17 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  BadRequestException,
   Logger,
 } from '@nestjs/common';
+import { randomBytes } from 'crypto';
+import { randomUUID } from 'crypto';
+import { extname } from 'path';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CacheService } from '../../infrastructure/cache/cache.service';
+import { S3Service } from '../files/s3.service';
+import { StripeService } from '../subscriptions/stripe.service';
 import { UpdateCompanyDto, InviteUserDto } from './dto';
 import { Company, User } from '@prisma/client';
 import {
@@ -14,6 +21,8 @@ import {
 } from '../notifications/events/notification.events';
 import type { MulterFile } from '../../common/interfaces';
 
+const COMPANY_CACHE_TTL = 300; // 5 minutes
+
 @Injectable()
 export class CompaniesService {
   private readonly logger = new Logger(CompaniesService.name);
@@ -21,6 +30,9 @@ export class CompaniesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly cache: CacheService,
+    private readonly s3: S3Service,
+    private readonly stripe: StripeService,
   ) {}
 
   async findById(id: string): Promise<Company> {
@@ -33,6 +45,10 @@ export class CompaniesService {
   }
 
   async findWithSubscription(id: string) {
+    const cacheKey = `company:${id}`;
+    const cached = await this.cache.get(cacheKey);
+    if (cached) return cached;
+
     const company = await this.prisma.company.findFirst({
       where: { id, deletedAt: null },
       include: {
@@ -46,12 +62,19 @@ export class CompaniesService {
     });
 
     if (!company) throw new NotFoundException('Company not found');
+
+    await this.cache.set(cacheKey, company, COMPANY_CACHE_TTL);
     return company;
   }
 
   async update(id: string, dto: UpdateCompanyDto): Promise<Company> {
     await this.findById(id);
-    return this.prisma.company.update({ where: { id }, data: dto });
+    const updated = await this.prisma.company.update({
+      where: { id },
+      data: dto,
+    });
+    await this.cache.del(`company:${id}`);
+    return updated;
   }
 
   async getMembers(
@@ -95,10 +118,40 @@ export class CompaniesService {
       );
     }
 
+    // Check for an existing pending invitation for this email + company
+    const pendingInvite = await this.prisma.invitationToken.findFirst({
+      where: {
+        email: dto.email,
+        companyId,
+        usedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+    });
+    if (pendingInvite) {
+      throw new ConflictException(
+        'A pending invitation already exists for this email',
+      );
+    }
+
     const [inviter, company] = await Promise.all([
       this.prisma.user.findUnique({ where: { id: inviterId } }),
       this.findById(companyId),
     ]);
+
+    // Generate a secure token for the accept-invite flow
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    await this.prisma.invitationToken.create({
+      data: {
+        token,
+        email: dto.email,
+        companyId,
+        invitedBy: inviterId,
+        role: dto.role ?? 'MEMBER',
+        expiresAt,
+      },
+    });
 
     const notifEvent = new UserInvitedEvent();
     notifEvent.inviteeEmail = dto.email;
@@ -107,6 +160,7 @@ export class CompaniesService {
     notifEvent.inviterName = inviter
       ? `${inviter.firstName} ${inviter.lastName}`
       : 'A team member';
+    notifEvent.inviteToken = token;
     this.eventEmitter.emit(NotificationEvent.USER_INVITED, notifEvent);
 
     this.logger.log(`Invitation sent to ${dto.email} for company ${companyId}`);
@@ -122,20 +176,36 @@ export class CompaniesService {
       where: { id: companyId },
       data: { deletedAt: new Date() },
     });
+    await this.cache.del(`company:${companyId}`);
     this.logger.log(`Company ${companyId} soft-deleted`);
   }
 
   async uploadLogo(
     companyId: string,
     file: MulterFile,
-  ): Promise<{ url: string }> {
+  ): Promise<{ key: string; url: string }> {
     await this.findById(companyId);
-    const url = `/uploads/logos/${file.filename}`;
+
+    const ext = extname(file.originalname).toLowerCase();
+    const key = `${companyId}/logos/${randomUUID()}${ext}`;
+
+    await this.s3.upload(key, file.buffer, file.mimetype, {
+      companyId,
+      resource: 'company-logo',
+    });
+
+    // Presigned download URL valid for 1 hour (for immediate display)
+    const url = await this.s3.getPresignedDownloadUrl(key, 3600);
+
     await this.prisma.company.update({
       where: { id: companyId },
-      data: { logoUrl: url },
+      data: { logoUrl: key }, // store key; generate fresh URLs as needed
     });
-    return { url };
+
+    // Invalidate company cache so next read picks up new logoUrl
+    await this.cache.del(`company:${companyId}`);
+
+    return { key, url };
   }
 
   async changePlan(
@@ -147,12 +217,34 @@ export class CompaniesService {
     });
     if (!plan) throw new NotFoundException('Plan not found or inactive');
 
-    // The actual Stripe subscription update is handled in SubscriptionsService
-    this.logger.log(
-      `Plan change requested for company ${companyId} to plan ${plan.slug}`,
+    const subscription = await this.prisma.subscription.findFirst({
+      where: { companyId, status: { in: ['ACTIVE', 'TRIALING'] } },
+    });
+    if (!subscription) {
+      throw new BadRequestException(
+        'No active subscription found. Create a subscription first.',
+      );
+    }
+
+    await this.stripe.updateSubscription(
+      subscription.stripeSubscriptionId,
+      plan.stripePriceId,
     );
+
+    await this.prisma.subscription.update({
+      where: { id: subscription.id },
+      data: { planId: plan.id },
+    });
+
+    // Stripe will fire customer.subscription.updated webhook which syncs status/period
+    await this.cache.del(`company:${companyId}`);
+
+    this.logger.log(
+      `Plan changed for company ${companyId} to ${plan.slug} (Stripe updated)`,
+    );
+
     return {
-      message: `Plan change to ${plan.name} initiated. Stripe update pending.`,
+      message: `Plan changed to ${plan.name}. Stripe update applied immediately with proration.`,
     };
   }
 }

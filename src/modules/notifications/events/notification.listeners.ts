@@ -159,7 +159,9 @@ export class NotificationListeners {
   @OnEvent(NotificationEvent.USER_INVITED, { async: true })
   async onUserInvited(event: UserInvitedEvent): Promise<void> {
     try {
-      const acceptUrl = `${this.email.appUrl}/auth/accept-invite?company=${event.companyId}`;
+      const acceptUrl = event.inviteToken
+        ? `${this.email.appUrl}/auth/accept-invite?token=${event.inviteToken}`
+        : `${this.email.appUrl}/auth/login`;
 
       const template = inviteUserTemplate({
         ...this.email.baseContext(),

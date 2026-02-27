@@ -3,6 +3,7 @@ import {
   ConflictException,
   UnauthorizedException,
   BadRequestException,
+  NotFoundException,
   Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -11,8 +12,11 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CacheService } from '../../infrastructure/cache/cache.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { AcceptInviteDto } from './dto/accept-invite.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtPayload } from '../../common/interfaces';
 import { User, Company } from '@prisma/client';
 import {
@@ -36,6 +40,15 @@ export interface AuthResponse {
 
 const BCRYPT_SALT_ROUNDS = 12;
 
+// Account lockout constants
+const ATTEMPTS_PREFIX = 'login_attempts:';
+const LOCKOUT_PREFIX = 'login_locked:';
+const LOCKOUT_THRESHOLD = 5;
+const LOCKOUT_TTL = 15 * 60; // 15 minutes in seconds
+
+// Cache TTL constants
+const USER_PROFILE_TTL = 300; // 5 minutes
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -45,6 +58,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly cache: CacheService,
   ) {}
 
   async register(dto: RegisterDto): Promise<AuthResponse> {
@@ -145,6 +159,8 @@ export class AuthService {
       }),
     ]);
 
+    await this.cache.del(`user:${record.userId}`);
+
     return { message: 'Email verified successfully.' };
   }
 
@@ -186,14 +202,43 @@ export class AuthService {
   }
 
   async login(dto: LoginDto): Promise<AuthResponse> {
+    const attemptsKey = `${ATTEMPTS_PREFIX}${dto.email}`;
+    const lockKey = `${LOCKOUT_PREFIX}${dto.email}`;
+
+    // Check if account is locked
+    const isLocked = await this.cache.get<boolean>(lockKey);
+    if (isLocked) {
+      const remainingTtl = await this.cache.ttl(lockKey);
+      const minutes = Math.ceil(remainingTtl / 60);
+      throw new UnauthorizedException(
+        `Account temporarily locked. Try again in ${minutes} minute(s).`,
+      );
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
       include: { company: true },
     });
 
     if (!user || !(await bcrypt.compare(dto.password, user.password))) {
+      // Record failed attempt
+      const attempts = await this.cache.incr(attemptsKey);
+      if (attempts === 1) {
+        // Set expiry only on first attempt (reset window)
+        await this.cache.expire(attemptsKey, LOCKOUT_TTL);
+      }
+      if (attempts >= LOCKOUT_THRESHOLD) {
+        await this.cache.set(lockKey, true, LOCKOUT_TTL);
+        await this.cache.del(attemptsKey);
+        this.logger.warn(
+          `Account locked after ${attempts} failed attempts: ${dto.email}`,
+        );
+      }
       throw new UnauthorizedException('Invalid credentials');
     }
+
+    // Successful login — clear any failed attempt counters
+    await this.cache.del(attemptsKey, lockKey);
 
     if (!user.isActive || user.deletedAt) {
       throw new UnauthorizedException('Account is inactive or deleted');
@@ -206,6 +251,102 @@ export class AuthService {
     const tokens = await this.generateTokenPair(user, user.company);
     const { password: _, company, ...userWithoutPassword } = user;
     return { user: userWithoutPassword, company, tokens };
+  }
+
+  async getProfile(userId: string): Promise<Omit<User, 'password'>> {
+    const cacheKey = `user:${userId}`;
+    const cached = await this.cache.get<Omit<User, 'password'>>(cacheKey);
+    if (cached) return cached;
+
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.deletedAt) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    const { password: _, ...userWithoutPassword } = user;
+    await this.cache.set(cacheKey, userWithoutPassword, USER_PROFILE_TTL);
+    return userWithoutPassword;
+  }
+
+  async changePassword(
+    userId: string,
+    dto: ChangePasswordDto,
+  ): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user || user.deletedAt) {
+      throw new NotFoundException('User not found');
+    }
+
+    const valid = await bcrypt.compare(dto.currentPassword, user.password);
+    if (!valid) {
+      throw new UnauthorizedException('Current password is incorrect');
+    }
+
+    const hashed = await bcrypt.hash(dto.newPassword, BCRYPT_SALT_ROUNDS);
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { password: hashed },
+      }),
+      // Revoke all refresh tokens to force re-login on other devices
+      this.prisma.refreshToken.updateMany({
+        where: { userId },
+        data: { revokedAt: new Date() },
+      }),
+    ]);
+
+    return { message: 'Password changed successfully.' };
+  }
+
+  async acceptInvite(dto: AcceptInviteDto): Promise<AuthResponse> {
+    const invitation = await this.prisma.invitationToken.findUnique({
+      where: { token: dto.token },
+      include: { company: true },
+    });
+
+    if (!invitation || invitation.usedAt || invitation.expiresAt < new Date()) {
+      throw new BadRequestException('Invalid or expired invitation token');
+    }
+
+    const existing = await this.prisma.user.findUnique({
+      where: { email: invitation.email },
+    });
+    if (existing) {
+      throw new ConflictException('Email already registered');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, BCRYPT_SALT_ROUNDS);
+
+    const user = await this.prisma.$transaction(async (tx) => {
+      const newUser = await tx.user.create({
+        data: {
+          email: invitation.email,
+          password: hashedPassword,
+          firstName: dto.firstName,
+          lastName: dto.lastName,
+          role: invitation.role,
+          companyId: invitation.companyId,
+          emailVerified: true, // invite link validates email ownership
+        },
+      });
+
+      await tx.invitationToken.update({
+        where: { id: invitation.id },
+        data: { usedAt: new Date() },
+      });
+
+      return newUser;
+    });
+
+    const tokens = await this.generateTokenPair(user, invitation.company);
+    const { password: _, ...userWithoutPassword } = user;
+
+    this.logger.log(
+      `Invite accepted: ${user.email} joined company ${invitation.company.slug}`,
+    );
+
+    return { user: userWithoutPassword, company: invitation.company, tokens };
   }
 
   async refreshTokens(
@@ -261,7 +402,6 @@ export class AuthService {
     const [accessToken, refreshToken] = await Promise.all([
       this.jwtService.signAsync(signPayload, {
         secret: this.configService.get<string>('jwt.accessSecret'),
-        // expiresIn accepts ms-compatible strings ('15m', '7d', etc.)
         expiresIn: (this.configService.get<string>('jwt.accessExpiresIn') ??
           '15m') as any,
       }),
@@ -356,6 +496,9 @@ export class AuthService {
         data: { revokedAt: new Date() },
       }),
     ]);
+
+    // Clear cached profile
+    await this.cache.del(`user:${resetToken.userId}`);
 
     const user = await this.prisma.user.findUnique({
       where: { id: resetToken.userId },

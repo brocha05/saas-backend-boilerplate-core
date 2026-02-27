@@ -18,6 +18,8 @@ import {
   ForgotPasswordDto,
   ResetPasswordDto,
   ConfirmEmailDto,
+  AcceptInviteDto,
+  ChangePasswordDto,
 } from './dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
@@ -73,9 +75,36 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @Get('me')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Return the current authenticated user payload' })
+  @ApiOperation({
+    summary: 'Return the full profile of the authenticated user',
+  })
   me(@CurrentUser() user: JwtPayload) {
-    return user;
+    return this.authService.getProfile(user.sub);
+  }
+
+  @ApiBearerAuth('access-token')
+  @UseGuards(JwtAuthGuard)
+  @Post('change-password')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 5, ttl: 300_000 } })
+  @ApiOperation({ summary: 'Change password while authenticated' })
+  changePassword(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(user.sub, dto);
+  }
+
+  @Public()
+  @Post('accept-invite')
+  @HttpCode(HttpStatus.CREATED)
+  @Throttle({ default: { limit: 10, ttl: 600_000 } })
+  @ApiOperation({
+    summary:
+      'Accept an invitation and create an account in the invited company',
+  })
+  acceptInvite(@Body() dto: AcceptInviteDto) {
+    return this.authService.acceptInvite(dto);
   }
 
   @Public()

@@ -23,6 +23,7 @@ import {
 // Infrastructure
 import { PrismaModule } from './prisma/prisma.module';
 import { LoggerModule } from './infrastructure/logger/logger.module';
+import { CacheModule } from './infrastructure/cache/cache.module';
 
 // Common
 import { GlobalExceptionFilter } from './common/filters';
@@ -83,6 +84,7 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
     // ─── Core ─────────────────────────────────────────────────────────────────
     PrismaModule,
     LoggerModule,
+    CacheModule,
 
     // ─── Feature Modules ──────────────────────────────────────────────────────
     AuthModule,

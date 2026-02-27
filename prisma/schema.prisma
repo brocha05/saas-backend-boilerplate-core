@@ -46,12 +46,13 @@ model Company {
   updatedAt        DateTime      @updatedAt @map("updated_at")
   deletedAt        DateTime?     @map("deleted_at")
 
-  users            User[]
-  subscriptions    Subscription[]
-  auditLogs        AuditLog[]
-  files            File[]
-  notifications    Notification[]
-  emailLogs        EmailLog[]
+  users             User[]
+  subscriptions     Subscription[]
+  auditLogs         AuditLog[]
+  files             File[]
+  notifications     Notification[]
+  emailLogs         EmailLog[]
+  invitationTokens  InvitationToken[]
 
   @@index([slug])
   @@index([deletedAt])
@@ -281,6 +282,27 @@ model EmailLog {
   @@index([event])
   @@index([companyId, status])
   @@map("email_logs")
+}
+
+// ─── InvitationToken ───────────────────────────────────────────────────────────
+
+model InvitationToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  token     String    @unique
+  email     String
+  companyId String    @db.Uuid @map("company_id")
+  invitedBy String    @db.Uuid @map("invited_by")
+  role      UserRole  @default(MEMBER)
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  company   Company   @relation(fields: [companyId], references: [id])
+
+  @@index([token])
+  @@index([email])
+  @@index([companyId])
+  @@map("invitation_tokens")
 }
 
 // ─── File ──────────────────────────────────────────────────────────────────────

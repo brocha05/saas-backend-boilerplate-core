@@ -4,3 +4,5 @@ export * from './refresh-token.dto';
 export * from './forgot-password.dto';
 export * from './reset-password.dto';
 export * from './confirm-email.dto';
+export * from './accept-invite.dto';
+export * from './change-password.dto';
