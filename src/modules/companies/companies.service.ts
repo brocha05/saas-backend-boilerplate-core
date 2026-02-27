@@ -67,7 +67,6 @@ export class CompaniesService {
         role: true,
         isActive: true,
         emailVerified: true,
-        twoFactorEnabled: true,
         companyId: true,
         createdAt: true,
         updatedAt: true,

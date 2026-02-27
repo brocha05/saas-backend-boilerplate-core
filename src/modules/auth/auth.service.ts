@@ -18,6 +18,7 @@ import { User, Company } from '@prisma/client';
 import {
   NotificationEvent,
   UserRegisteredEvent,
+  EmailVerificationRequestedEvent,
   PasswordResetRequestedEvent,
   PasswordResetCompletedEvent,
 } from '../notifications/events/notification.events';
@@ -92,16 +93,96 @@ export class AuthService {
       `New user registered: ${user.email} (company: ${company.slug})`,
     );
 
-    const event = new UserRegisteredEvent();
-    event.userId = user.id;
-    event.email = user.email;
-    event.firstName = user.firstName;
-    event.companyId = company.id;
-    event.companyName = company.name;
-    this.eventEmitter.emit(NotificationEvent.USER_REGISTERED, event);
+    const welcomeEvent = new UserRegisteredEvent();
+    welcomeEvent.userId = user.id;
+    welcomeEvent.email = user.email;
+    welcomeEvent.firstName = user.firstName;
+    welcomeEvent.companyId = company.id;
+    welcomeEvent.companyName = company.name;
+    this.eventEmitter.emit(NotificationEvent.USER_REGISTERED, welcomeEvent);
+
+    // Send email verification
+    const verificationToken = randomBytes(32).toString('hex');
+    const verificationExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+    await this.prisma.emailVerificationToken.create({
+      data: {
+        token: verificationToken,
+        userId: user.id,
+        expiresAt: verificationExpiresAt,
+      },
+    });
+    const verifyEvent = new EmailVerificationRequestedEvent();
+    verifyEvent.userId = user.id;
+    verifyEvent.email = user.email;
+    verifyEvent.firstName = user.firstName;
+    verifyEvent.verificationToken = verificationToken;
+    this.eventEmitter.emit(
+      NotificationEvent.EMAIL_VERIFICATION_REQUESTED,
+      verifyEvent,
+    );
 
     const { password: _, ...userWithoutPassword } = user;
     return { user: userWithoutPassword, company, tokens };
+  }
+
+  async confirmEmail(token: string): Promise<{ message: string }> {
+    const record = await this.prisma.emailVerificationToken.findUnique({
+      where: { token },
+    });
+
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      throw new BadRequestException('Invalid or expired verification token');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: record.userId },
+        data: { emailVerified: true },
+      }),
+      this.prisma.emailVerificationToken.update({
+        where: { id: record.id },
+        data: { usedAt: new Date() },
+      }),
+    ]);
+
+    return { message: 'Email verified successfully.' };
+  }
+
+  async resendConfirmation(userId: string): Promise<{ message: string }> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+
+    if (!user || !user.isActive || user.deletedAt) {
+      throw new BadRequestException('User not found or inactive');
+    }
+
+    if (user.emailVerified) {
+      throw new BadRequestException('Email is already verified');
+    }
+
+    // Invalidate existing pending tokens
+    await this.prisma.emailVerificationToken.updateMany({
+      where: { userId, usedAt: null },
+      data: { usedAt: new Date() },
+    });
+
+    const token = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+
+    await this.prisma.emailVerificationToken.create({
+      data: { token, userId, expiresAt },
+    });
+
+    const event = new EmailVerificationRequestedEvent();
+    event.userId = user.id;
+    event.email = user.email;
+    event.firstName = user.firstName;
+    event.verificationToken = token;
+    this.eventEmitter.emit(
+      NotificationEvent.EMAIL_VERIFICATION_REQUESTED,
+      event,
+    );
+
+    return { message: 'Verification email sent.' };
   }
 
   async login(dto: LoginDto): Promise<AuthResponse> {
@@ -292,5 +373,4 @@ export class AuthService {
 
     return { message: 'Password reset successfully.' };
   }
-
 }

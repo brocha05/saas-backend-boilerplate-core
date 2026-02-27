@@ -17,6 +17,7 @@ import {
   RefreshTokenDto,
   ForgotPasswordDto,
   ResetPasswordDto,
+  ConfirmEmailDto,
 } from './dto';
 import { Public } from '../../common/decorators/public.decorator';
 import { JwtRefreshGuard } from './guards/jwt-refresh.guard';
@@ -90,8 +91,31 @@ export class AuthController {
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @Throttle({ default: { limit: 5, ttl: 900_000 } })
-  @ApiOperation({ summary: 'Reset password using a token from the reset email' })
+  @ApiOperation({
+    summary: 'Reset password using a token from the reset email',
+  })
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto.token, dto.newPassword);
+  }
+
+  @Public()
+  @Post('confirm-email')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({
+    summary: 'Verify email address using the token from the verification email',
+  })
+  confirmEmail(@Body() dto: ConfirmEmailDto) {
+    return this.authService.confirmEmail(dto.token);
+  }
+
+  @ApiBearerAuth('access-token')
+  @UseGuards(JwtAuthGuard)
+  @Post('resend-confirmation')
+  @HttpCode(HttpStatus.OK)
+  @Throttle({ default: { limit: 3, ttl: 300_000 } })
+  @ApiOperation({ summary: 'Resend the email verification link' })
+  resendConfirmation(@CurrentUser() user: JwtPayload) {
+    return this.authService.resendConfirmation(user.sub);
   }
 }

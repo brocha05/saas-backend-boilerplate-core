@@ -8,6 +8,7 @@ import { NotificationsService } from '../notifications.service';
 import {
   NotificationEvent,
   UserRegisteredEvent,
+  EmailVerificationRequestedEvent,
   PasswordResetRequestedEvent,
   PasswordResetCompletedEvent,
   UserInvitedEvent,
@@ -18,6 +19,7 @@ import {
 } from './notification.events';
 
 import { welcomeTemplate } from '../email/templates/welcome.template';
+import { emailVerificationTemplate } from '../email/templates/email-verification.template';
 import {
   passwordResetTemplate,
   passwordResetCompletedTemplate,
@@ -67,6 +69,34 @@ export class NotificationListeners {
     } catch (err) {
       this.logger.error(
         'onUserRegistered handler failed',
+        (err as Error).stack,
+      );
+    }
+  }
+
+  @OnEvent(NotificationEvent.EMAIL_VERIFICATION_REQUESTED, { async: true })
+  async onEmailVerificationRequested(
+    event: EmailVerificationRequestedEvent,
+  ): Promise<void> {
+    try {
+      const verifyUrl = `${this.email.appUrl}/auth/confirm-email?token=${event.verificationToken}`;
+
+      const template = emailVerificationTemplate({
+        ...this.email.baseContext(),
+        firstName: event.firstName,
+        verifyUrl,
+        expiresInHours: 24,
+      });
+
+      await this.email.send({
+        event: NotificationEvent.EMAIL_VERIFICATION_REQUESTED,
+        to: event.email,
+        ...template,
+        userId: event.userId,
+      });
+    } catch (err) {
+      this.logger.error(
+        'onEmailVerificationRequested handler failed',
         (err as Error).stack,
       );
     }
