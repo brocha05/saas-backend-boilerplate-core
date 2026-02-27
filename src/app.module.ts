@@ -18,7 +18,6 @@ import {
   stripeConfig,
   s3Config,
   sesConfig,
-  mfaConfig,
 } from './config';
 
 // Infrastructure
@@ -52,7 +51,6 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
         stripeConfig,
         s3Config,
         sesConfig,
-        mfaConfig,
       ],
       expandVariables: true,
     }),

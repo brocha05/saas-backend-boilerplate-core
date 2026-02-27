@@ -33,12 +33,6 @@ export interface AuthResponse {
   tokens: TokenPair;
 }
 
-export interface MfaRequiredResponse {
-  mfaRequired: true;
-  /** Short-lived JWT (5 min). Send as Bearer token to POST /auth/2fa/challenge. */
-  mfaToken: string;
-}
-
 const BCRYPT_SALT_ROUNDS = 12;
 
 @Injectable()
@@ -110,7 +104,7 @@ export class AuthService {
     return { user: userWithoutPassword, company, tokens };
   }
 
-  async login(dto: LoginDto): Promise<AuthResponse | MfaRequiredResponse> {
+  async login(dto: LoginDto): Promise<AuthResponse> {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
       include: { company: true },
@@ -128,55 +122,9 @@ export class AuthService {
       throw new UnauthorizedException('Company is inactive');
     }
 
-    // ── 2FA gate ──────────────────────────────────────────────────────────────
-    if (user.twoFactorEnabled) {
-      return {
-        mfaRequired: true,
-        mfaToken: this.generateMfaToken(user.id),
-      };
-    }
-
     const tokens = await this.generateTokenPair(user, user.company);
     const { password: _, company, ...userWithoutPassword } = user;
     return { user: userWithoutPassword, company, tokens };
-  }
-
-  /**
-   * Issues a full session for a user whose identity has already been verified
-   * through both password AND 2FA challenge.
-   * Never call this without prior 2FA verification.
-   */
-  async createSessionForUser(userId: string): Promise<AuthResponse> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      include: { company: true },
-    });
-
-    if (!user || !user.isActive || user.deletedAt) {
-      throw new UnauthorizedException('Account is inactive or deleted');
-    }
-
-    if (user.company.deletedAt) {
-      throw new UnauthorizedException('Company is inactive');
-    }
-
-    const tokens = await this.generateTokenPair(user, user.company);
-    const { password, company, ...userWithoutPassword } = user;
-    return { user: userWithoutPassword, company, tokens };
-  }
-
-  /**
-   * Generates a short-lived (5 min) JWT with `type: 'mfa'`.
-   * It is only accepted by MfaTokenGuard and explicitly rejected by JwtStrategy.
-   */
-  generateMfaToken(userId: string): string {
-    return this.jwtService.sign(
-      { sub: userId, type: 'mfa' },
-      {
-        secret: this.configService.get<string>('jwt.accessSecret'),
-        expiresIn: '5m' as any,
-      },
-    );
   }
 
   async refreshTokens(
@@ -345,11 +293,4 @@ export class AuthService {
     return { message: 'Password reset successfully.' };
   }
 
-  async validateUser(email: string, password: string): Promise<User | null> {
-    const user = await this.prisma.user.findUnique({ where: { email } });
-    if (user && (await bcrypt.compare(password, user.password))) {
-      return user;
-    }
-    return null;
-  }
 }

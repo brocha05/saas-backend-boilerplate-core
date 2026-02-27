@@ -70,8 +70,6 @@ model User {
   role             UserRole  @default(MEMBER)
   isActive         Boolean   @default(true) @map("is_active")
   emailVerified    Boolean   @default(false) @map("email_verified")
-  twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")
-  twoFactorSecret  String?   @map("two_factor_secret")
   companyId        String    @db.Uuid @map("company_id")
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
@@ -84,7 +82,6 @@ model User {
   files                File[]
   notifications        Notification[]
   emailLogs            EmailLog[]
-  backupCodes          BackupCode[]
 
   @@index([email])
   @@index([companyId])
@@ -126,22 +123,6 @@ model PasswordResetToken {
   @@index([token])
   @@index([userId])
   @@map("password_reset_tokens")
-}
-
-// ─── BackupCode ────────────────────────────────────────────────────────────────
-
-model BackupCode {
-  id        String    @id @default(uuid()) @db.Uuid
-  userId    String    @db.Uuid @map("user_id")
-  codeHash  String    @map("code_hash")
-  usedAt    DateTime? @map("used_at")
-  createdAt DateTime  @default(now()) @map("created_at")
-
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([userId, codeHash])
-  @@index([userId])
-  @@map("backup_codes")
 }
 
 // ─── Plan ──────────────────────────────────────────────────────────────────────
