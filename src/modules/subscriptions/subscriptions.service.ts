@@ -9,8 +9,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CacheService } from '../../infrastructure/cache/cache.service';
 import { StripeService } from './stripe.service';
-import { CreateSubscriptionDto } from './dto';
-import { Subscription, SubscriptionStatus } from '@prisma/client';
+import { CreateSubscriptionDto, CreatePlanDto, UpdatePlanDto } from './dto';
+import { Prisma, Subscription, SubscriptionStatus } from '@prisma/client';
 import Stripe from 'stripe';
 import {
   NotificationEvent,
@@ -67,6 +67,62 @@ export class SubscriptionsService {
       include: { plan: true },
       orderBy: { createdAt: 'desc' },
     }) as Promise<Subscription | null>;
+  }
+
+  // ─── Admin Plan Management ─────────────────────────────────────────────────
+
+  async createPlan(dto: CreatePlanDto) {
+    const plan = await this.prisma.plan.create({
+      data: {
+        name: dto.name,
+        slug: dto.slug,
+        stripePriceId: dto.stripePriceId,
+        stripeProductId: dto.stripeProductId,
+        interval: dto.interval,
+        price: dto.price,
+        currency: dto.currency ?? 'usd',
+        features: (dto.features ?? []) as Prisma.InputJsonValue,
+        limits: (dto.limits ?? {}) as Prisma.InputJsonValue,
+      },
+    });
+    await this.cache.del('plans:public');
+    return plan;
+  }
+
+  async updatePlan(id: string, dto: UpdatePlanDto) {
+    const plan = await this.prisma.plan.update({
+      where: { id },
+      data: {
+        ...(dto.name !== undefined && { name: dto.name }),
+        ...(dto.slug !== undefined && { slug: dto.slug }),
+        ...(dto.stripePriceId !== undefined && {
+          stripePriceId: dto.stripePriceId,
+        }),
+        ...(dto.stripeProductId !== undefined && {
+          stripeProductId: dto.stripeProductId,
+        }),
+        ...(dto.interval !== undefined && { interval: dto.interval }),
+        ...(dto.price !== undefined && { price: dto.price }),
+        ...(dto.currency !== undefined && { currency: dto.currency }),
+        ...(dto.features !== undefined && {
+          features: dto.features as Prisma.InputJsonValue,
+        }),
+        ...(dto.limits !== undefined && {
+          limits: dto.limits as Prisma.InputJsonValue,
+        }),
+      },
+    });
+    await this.cache.del('plans:public');
+    return plan;
+  }
+
+  async deactivatePlan(id: string): Promise<{ message: string }> {
+    await this.prisma.plan.update({
+      where: { id },
+      data: { isActive: false },
+    });
+    await this.cache.del('plans:public');
+    return { message: 'Plan deactivated.' };
   }
 
   async getPublicPlans() {

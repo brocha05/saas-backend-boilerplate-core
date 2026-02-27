@@ -3,7 +3,6 @@ import { OnEvent } from '@nestjs/event-emitter';
 
 import { PrismaService } from '../../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
-import { NotificationsService } from '../notifications.service';
 
 import {
   NotificationEvent,
@@ -36,7 +35,6 @@ export class NotificationListeners {
 
   constructor(
     private readonly email: EmailService,
-    private readonly notifications: NotificationsService,
     private readonly prisma: PrismaService,
   ) {}
 
@@ -57,14 +55,6 @@ export class NotificationListeners {
         ...template,
         userId: event.userId,
         companyId: event.companyId,
-      });
-
-      await this.notifications.create({
-        userId: event.userId,
-        companyId: event.companyId,
-        type: NotificationEvent.USER_REGISTERED,
-        title: `Welcome to ${this.email.appName}!`,
-        body: `Your account and company "${event.companyName}" are ready.`,
       });
     } catch (err) {
       this.logger.error(
@@ -207,14 +197,6 @@ export class NotificationListeners {
           userId: admin.id,
           companyId: event.companyId,
         });
-
-        await this.notifications.create({
-          userId: admin.id,
-          companyId: event.companyId,
-          type: NotificationEvent.SUBSCRIPTION_ACTIVATED,
-          title: 'Subscription Activated',
-          body: `Your ${event.planName} plan is now active.`,
-        });
       }
     } catch (err) {
       this.logger.error(
@@ -229,9 +211,6 @@ export class NotificationListeners {
     try {
       const company = await this.getCompanyWithAdmins(event.companyId);
       if (!company) return;
-
-      const amount = (event.amountPaid / 100).toFixed(2);
-      const currency = event.currency.toUpperCase();
 
       for (const admin of company.users) {
         const template = invoicePaidTemplate({
@@ -251,15 +230,6 @@ export class NotificationListeners {
           userId: admin.id,
           companyId: event.companyId,
         });
-
-        await this.notifications.create({
-          userId: admin.id,
-          companyId: event.companyId,
-          type: NotificationEvent.INVOICE_PAID,
-          title: 'Payment Received',
-          body: `${currency} ${amount} payment confirmed.`,
-          metadata: { amountPaid: event.amountPaid, currency: event.currency },
-        });
       }
     } catch (err) {
       this.logger.error('onInvoicePaid handler failed', (err as Error).stack);
@@ -272,8 +242,6 @@ export class NotificationListeners {
       const company = await this.getCompanyWithAdmins(event.companyId);
       if (!company) return;
 
-      const amount = (event.amountDue / 100).toFixed(2);
-      const currency = event.currency.toUpperCase();
       const updatePaymentUrl = `${this.email.appUrl}/settings/billing`;
 
       for (const admin of company.users) {
@@ -293,15 +261,6 @@ export class NotificationListeners {
           ...template,
           userId: admin.id,
           companyId: event.companyId,
-        });
-
-        await this.notifications.create({
-          userId: admin.id,
-          companyId: event.companyId,
-          type: NotificationEvent.PAYMENT_FAILED,
-          title: 'Payment Failed',
-          body: `We couldn't process your ${currency} ${amount} payment. Please update your billing info.`,
-          metadata: { amountDue: event.amountDue, currency: event.currency },
         });
       }
     } catch (err) {
@@ -335,15 +294,6 @@ export class NotificationListeners {
           ...template,
           userId: admin.id,
           companyId: event.companyId,
-        });
-
-        await this.notifications.create({
-          userId: admin.id,
-          companyId: event.companyId,
-          type: NotificationEvent.SUBSCRIPTION_CANCELED,
-          title: 'Subscription Canceled',
-          body: `Your ${event.planName} plan has been canceled.`,
-          metadata: { planName: event.planName, cancelAt: event.cancelAt },
         });
       }
     } catch (err) {

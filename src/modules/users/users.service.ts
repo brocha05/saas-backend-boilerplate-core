@@ -175,6 +175,10 @@ export class UsersService {
     const valid = await bcrypt.compare(dto.password, user.password);
     if (!valid) throw new UnauthorizedException('Password is incorrect');
 
+    // TODO (GDPR): This is a soft-delete. For full GDPR "right to erasure" compliance,
+    // implement a scheduled job that hard-deletes soft-deleted users after your
+    // retention period (e.g. 30 days) and anonymizes personal data in related records
+    // (EmailLog.recipient, File metadata, etc.).
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: userId },

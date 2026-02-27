@@ -9,4 +9,5 @@ export const appConfig = registerAs('app', () => ({
     ttl: parseInt(process.env.THROTTLE_TTL ?? '60000', 10),
     limit: parseInt(process.env.THROTTLE_LIMIT ?? '100', 10),
   },
+  adminApiKey: process.env.ADMIN_API_KEY,
 }));

@@ -79,7 +79,7 @@ export class CompaniesService {
 
   async getMembers(
     companyId: string,
-  ): Promise<Omit<User, 'password' | 'twoFactorSecret'>[]> {
+  ): Promise<Omit<User, 'password'>[]> {
     const users = await this.prisma.user.findMany({
       where: { companyId, deletedAt: null },
       select: {

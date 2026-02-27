@@ -1,9 +1,4 @@
-import {
-  Module,
-  MiddlewareConsumer,
-  NestModule,
-  RequestMethod,
-} from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
@@ -28,7 +23,6 @@ import { CacheModule } from './infrastructure/cache/cache.module';
 // Common
 import { GlobalExceptionFilter } from './common/filters';
 import { LoggingInterceptor } from './common/interceptors';
-import { AuditMiddleware } from './common/middleware/audit.middleware';
 
 // Feature modules
 import { AuthModule } from './modules/auth/auth.module';
@@ -38,7 +32,6 @@ import { SubscriptionsModule } from './modules/subscriptions/subscriptions.modul
 import { HealthModule } from './modules/health/health.module';
 import { FilesModule } from './modules/files/files.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
-import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
 
 @Module({
   imports: [
@@ -94,7 +87,6 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
     HealthModule,
     FilesModule,
     NotificationsModule,
-    AuditLogsModule,
 
     // ─── Event Bus ────────────────────────────────────────────────────────────
     EventEmitterModule.forRoot({
@@ -115,10 +107,4 @@ import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer): void {
-    consumer
-      .apply(AuditMiddleware)
-      .forRoutes({ path: '*', method: RequestMethod.ALL });
-  }
-}
+export class AppModule {}

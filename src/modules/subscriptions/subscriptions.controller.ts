@@ -2,9 +2,11 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Headers,
+  Param,
   Req,
   HttpCode,
   HttpStatus,
@@ -13,9 +15,10 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { SubscriptionsService } from './subscriptions.service';
-import { CreateSubscriptionDto } from './dto';
+import { CreateSubscriptionDto, CreatePlanDto, UpdatePlanDto } from './dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { AdminApiKeyGuard } from '../../common/guards/admin-api-key.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
@@ -35,6 +38,33 @@ export class SubscriptionsController {
   })
   getPublicPlans() {
     return this.subscriptionsService.getPublicPlans();
+  }
+
+  // ─── Admin plan management (x-admin-api-key) ───────────────────────────────
+
+  @Public()
+  @UseGuards(AdminApiKeyGuard)
+  @Post('plans')
+  @ApiOperation({ summary: 'Create a new pricing plan (admin only)' })
+  createPlan(@Body() dto: CreatePlanDto) {
+    return this.subscriptionsService.createPlan(dto);
+  }
+
+  @Public()
+  @UseGuards(AdminApiKeyGuard)
+  @Patch('plans/:id')
+  @ApiOperation({ summary: 'Update a pricing plan (admin only)' })
+  updatePlan(@Param('id') id: string, @Body() dto: UpdatePlanDto) {
+    return this.subscriptionsService.updatePlan(id, dto);
+  }
+
+  @Public()
+  @UseGuards(AdminApiKeyGuard)
+  @Patch('plans/:id/deactivate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Deactivate a pricing plan (admin only)' })
+  deactivatePlan(@Param('id') id: string) {
+    return this.subscriptionsService.deactivatePlan(id);
   }
 
   // ─── Authenticated ─────────────────────────────────────────────────────────

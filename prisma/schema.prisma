@@ -48,9 +48,7 @@ model Company {
 
   users             User[]
   subscriptions     Subscription[]
-  auditLogs         AuditLog[]
   files             File[]
-  notifications     Notification[]
   emailLogs         EmailLog[]
   invitationTokens  InvitationToken[]
 
@@ -80,9 +78,7 @@ model User {
   refreshTokens              RefreshToken[]
   passwordResetTokens        PasswordResetToken[]
   emailVerificationTokens    EmailVerificationToken[]
-  auditLogs                  AuditLog[]
   files                      File[]
-  notifications              Notification[]
   emailLogs                  EmailLog[]
 
   @@index([email])
@@ -204,57 +200,6 @@ model ProcessedStripeEvent {
 
   @@index([processedAt])
   @@map("processed_stripe_events")
-}
-
-// ─── AuditLog ──────────────────────────────────────────────────────────────────
-
-model AuditLog {
-  id         String    @id @default(uuid()) @db.Uuid
-  companyId  String?   @db.Uuid @map("company_id")
-  userId     String?   @db.Uuid @map("user_id")
-  action     String
-  resource   String
-  resourceId String?   @map("resource_id")
-  method     String
-  path       String
-  statusCode Int?      @map("status_code")
-  ipAddress  String?   @map("ip_address")
-  userAgent  String?   @map("user_agent")
-  metadata   Json?
-  createdAt  DateTime  @default(now()) @map("created_at")
-
-  company    Company?  @relation(fields: [companyId], references: [id])
-  user       User?     @relation(fields: [userId], references: [id])
-
-  @@index([companyId])
-  @@index([userId])
-  @@index([action])
-  @@index([createdAt])
-  @@map("audit_logs")
-}
-
-// ─── Notification ──────────────────────────────────────────────────────────────
-
-model Notification {
-  id        String    @id @default(uuid()) @db.Uuid
-  companyId String    @db.Uuid @map("company_id")
-  userId    String    @db.Uuid @map("user_id")
-
-  type      String
-  title     String
-  body      String
-  metadata  Json?
-
-  readAt    DateTime? @map("read_at")
-  createdAt DateTime  @default(now()) @map("created_at")
-
-  company   Company   @relation(fields: [companyId], references: [id])
-  user      User      @relation(fields: [userId], references: [id])
-
-  @@index([userId, readAt])
-  @@index([companyId])
-  @@index([userId, companyId, readAt])
-  @@map("notifications")
 }
 
 // ─── EmailLog ─────────────────────────────────────────────────────────────────
