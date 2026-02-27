@@ -1,0 +1,364 @@
+import { Injectable, Logger } from '@nestjs/common';
+import { OnEvent } from '@nestjs/event-emitter';
+
+import { PrismaService } from '../../../prisma/prisma.service';
+import { EmailService } from '../email/email.service';
+import { NotificationsService } from '../notifications.service';
+import { EmailPreferencesService } from '../../email-preferences/email-preferences.service';
+import { EmailCategory } from '../../email-preferences/email-category.constants';
+
+import {
+  NotificationEvent,
+  UserRegisteredEvent,
+  PasswordResetRequestedEvent,
+  PasswordResetCompletedEvent,
+  UserInvitedEvent,
+  SubscriptionActivatedEvent,
+  InvoicePaidEvent,
+  PaymentFailedEvent,
+  SubscriptionCanceledEvent,
+} from './notification.events';
+
+import { welcomeTemplate } from '../email/templates/welcome.template';
+import {
+  passwordResetTemplate,
+  passwordResetCompletedTemplate,
+} from '../email/templates/password-reset.template';
+import { inviteUserTemplate } from '../email/templates/invite-user.template';
+import { subscriptionActivatedTemplate } from '../email/templates/subscription-activated.template';
+import { invoicePaidTemplate } from '../email/templates/invoice-paid.template';
+import { paymentFailedTemplate } from '../email/templates/payment-failed.template';
+import { subscriptionCanceledTemplate } from '../email/templates/subscription-canceled.template';
+
+@Injectable()
+export class NotificationListeners {
+  private readonly logger = new Logger(NotificationListeners.name);
+
+  constructor(
+    private readonly email: EmailService,
+    private readonly notifications: NotificationsService,
+    private readonly prisma: PrismaService,
+    private readonly emailPrefs: EmailPreferencesService,
+  ) {}
+
+  // ─── Auth ──────────────────────────────────────────────────────────────────
+
+  @OnEvent(NotificationEvent.USER_REGISTERED, { async: true })
+  async onUserRegistered(event: UserRegisteredEvent): Promise<void> {
+    try {
+      const template = welcomeTemplate({
+        ...this.email.baseContext(),
+        firstName: event.firstName,
+        companyName: event.companyName,
+      });
+
+      await this.email.send({
+        event: NotificationEvent.USER_REGISTERED,
+        to: event.email,
+        ...template,
+        userId: event.userId,
+        companyId: event.companyId,
+      });
+
+      await this.notifications.create({
+        userId: event.userId,
+        companyId: event.companyId,
+        type: NotificationEvent.USER_REGISTERED,
+        title: `Welcome to ${this.email.appName}!`,
+        body: `Your account and company "${event.companyName}" are ready.`,
+      });
+    } catch (err) {
+      this.logger.error('onUserRegistered handler failed', (err as Error).stack);
+    }
+  }
+
+  @OnEvent(NotificationEvent.PASSWORD_RESET_REQUESTED, { async: true })
+  async onPasswordResetRequested(
+    event: PasswordResetRequestedEvent,
+  ): Promise<void> {
+    try {
+      const resetUrl = `${this.email.appUrl}/auth/reset-password?token=${event.resetToken}`;
+
+      const template = passwordResetTemplate({
+        ...this.email.baseContext(),
+        firstName: event.firstName,
+        resetUrl,
+        expiresInMinutes: 60,
+      });
+
+      await this.email.send({
+        event: NotificationEvent.PASSWORD_RESET_REQUESTED,
+        to: event.email,
+        ...template,
+        userId: event.userId,
+      });
+    } catch (err) {
+      this.logger.error(
+        'onPasswordResetRequested handler failed',
+        (err as Error).stack,
+      );
+    }
+  }
+
+  @OnEvent(NotificationEvent.PASSWORD_RESET_COMPLETED, { async: true })
+  async onPasswordResetCompleted(
+    event: PasswordResetCompletedEvent,
+  ): Promise<void> {
+    try {
+      const template = passwordResetCompletedTemplate({
+        ...this.email.baseContext(),
+        firstName: event.firstName,
+      });
+
+      await this.email.send({
+        event: NotificationEvent.PASSWORD_RESET_COMPLETED,
+        to: event.email,
+        ...template,
+        userId: event.userId,
+      });
+    } catch (err) {
+      this.logger.error(
+        'onPasswordResetCompleted handler failed',
+        (err as Error).stack,
+      );
+    }
+  }
+
+  // ─── Users / Invite ────────────────────────────────────────────────────────
+
+  @OnEvent(NotificationEvent.USER_INVITED, { async: true })
+  async onUserInvited(event: UserInvitedEvent): Promise<void> {
+    try {
+      // TODO: replace with a real token-based accept URL
+      const acceptUrl = `${this.email.appUrl}/auth/accept-invite?company=${event.companyId}`;
+
+      const template = inviteUserTemplate({
+        ...this.email.baseContext(),
+        inviteeName: event.inviteeName,
+        inviterName: event.inviterName,
+        companyName: event.companyName,
+        acceptUrl,
+      });
+
+      await this.email.send({
+        event: NotificationEvent.USER_INVITED,
+        to: event.inviteeEmail,
+        ...template,
+        companyId: event.companyId,
+      });
+    } catch (err) {
+      this.logger.error('onUserInvited handler failed', (err as Error).stack);
+    }
+  }
+
+  // ─── Subscriptions ─────────────────────────────────────────────────────────
+  // All billing handlers fetch company + admins in a single query to avoid N+1.
+
+  @OnEvent(NotificationEvent.SUBSCRIPTION_ACTIVATED, { async: true })
+  async onSubscriptionActivated(
+    event: SubscriptionActivatedEvent,
+  ): Promise<void> {
+    try {
+      const company = await this.getCompanyWithAdmins(event.companyId);
+      if (!company) return;
+
+      for (const admin of company.users) {
+        const prefs = await this.emailPrefs.findOrCreate(admin.id);
+
+        if (prefs.billing) {
+          const template = subscriptionActivatedTemplate({
+            ...this.email.baseContext(),
+            firstName: admin.firstName,
+            companyName: company.name,
+            planName: event.planName,
+          });
+
+          await this.email.send({
+            event: NotificationEvent.SUBSCRIPTION_ACTIVATED,
+            to: admin.email,
+            ...template,
+            userId: admin.id,
+            companyId: event.companyId,
+            unsubscribeToken: prefs.unsubscribeToken,
+          });
+        }
+
+        await this.notifications.create({
+          userId: admin.id,
+          companyId: event.companyId,
+          type: NotificationEvent.SUBSCRIPTION_ACTIVATED,
+          title: 'Subscription Activated',
+          body: `Your ${event.planName} plan is now active.`,
+        });
+      }
+    } catch (err) {
+      this.logger.error(
+        'onSubscriptionActivated handler failed',
+        (err as Error).stack,
+      );
+    }
+  }
+
+  @OnEvent(NotificationEvent.INVOICE_PAID, { async: true })
+  async onInvoicePaid(event: InvoicePaidEvent): Promise<void> {
+    try {
+      const company = await this.getCompanyWithAdmins(event.companyId);
+      if (!company) return;
+
+      const amount = (event.amountPaid / 100).toFixed(2);
+      const currency = event.currency.toUpperCase();
+
+      for (const admin of company.users) {
+        const prefs = await this.emailPrefs.findOrCreate(admin.id);
+
+        if (prefs.billing) {
+          const template = invoicePaidTemplate({
+            ...this.email.baseContext(),
+            firstName: admin.firstName,
+            companyName: company.name,
+            amountPaid: event.amountPaid,
+            currency: event.currency,
+            periodEnd: event.periodEnd,
+            invoicePdfUrl: event.invoicePdfUrl,
+          });
+
+          await this.email.send({
+            event: NotificationEvent.INVOICE_PAID,
+            to: admin.email,
+            ...template,
+            userId: admin.id,
+            companyId: event.companyId,
+            unsubscribeToken: prefs.unsubscribeToken,
+          });
+        }
+
+        await this.notifications.create({
+          userId: admin.id,
+          companyId: event.companyId,
+          type: NotificationEvent.INVOICE_PAID,
+          title: 'Payment Received',
+          body: `${currency} ${amount} payment confirmed.`,
+          metadata: { amountPaid: event.amountPaid, currency: event.currency },
+        });
+      }
+    } catch (err) {
+      this.logger.error('onInvoicePaid handler failed', (err as Error).stack);
+    }
+  }
+
+  @OnEvent(NotificationEvent.PAYMENT_FAILED, { async: true })
+  async onPaymentFailed(event: PaymentFailedEvent): Promise<void> {
+    try {
+      const company = await this.getCompanyWithAdmins(event.companyId);
+      if (!company) return;
+
+      const amount = (event.amountDue / 100).toFixed(2);
+      const currency = event.currency.toUpperCase();
+      const updatePaymentUrl = `${this.email.appUrl}/settings/billing`;
+
+      for (const admin of company.users) {
+        const prefs = await this.emailPrefs.findOrCreate(admin.id);
+
+        if (prefs.billing) {
+          const template = paymentFailedTemplate({
+            ...this.email.baseContext(),
+            firstName: admin.firstName,
+            companyName: company.name,
+            amountDue: event.amountDue,
+            currency: event.currency,
+            nextRetryAt: event.nextRetryAt,
+            updatePaymentUrl,
+          });
+
+          await this.email.send({
+            event: NotificationEvent.PAYMENT_FAILED,
+            to: admin.email,
+            ...template,
+            userId: admin.id,
+            companyId: event.companyId,
+            unsubscribeToken: prefs.unsubscribeToken,
+          });
+        }
+
+        await this.notifications.create({
+          userId: admin.id,
+          companyId: event.companyId,
+          type: NotificationEvent.PAYMENT_FAILED,
+          title: 'Payment Failed',
+          body: `We couldn't process your ${currency} ${amount} payment. Please update your billing info.`,
+          metadata: { amountDue: event.amountDue, currency: event.currency },
+        });
+      }
+    } catch (err) {
+      this.logger.error('onPaymentFailed handler failed', (err as Error).stack);
+    }
+  }
+
+  @OnEvent(NotificationEvent.SUBSCRIPTION_CANCELED, { async: true })
+  async onSubscriptionCanceled(
+    event: SubscriptionCanceledEvent,
+  ): Promise<void> {
+    try {
+      const company = await this.getCompanyWithAdmins(event.companyId);
+      if (!company) return;
+
+      const reactivateUrl = `${this.email.appUrl}/settings/billing`;
+
+      for (const admin of company.users) {
+        const prefs = await this.emailPrefs.findOrCreate(admin.id);
+
+        if (prefs.billing) {
+          const template = subscriptionCanceledTemplate({
+            ...this.email.baseContext(),
+            firstName: admin.firstName,
+            companyName: company.name,
+            planName: event.planName,
+            cancelAt: event.cancelAt,
+            reactivateUrl,
+          });
+
+          await this.email.send({
+            event: NotificationEvent.SUBSCRIPTION_CANCELED,
+            to: admin.email,
+            ...template,
+            userId: admin.id,
+            companyId: event.companyId,
+            unsubscribeToken: prefs.unsubscribeToken,
+          });
+        }
+
+        await this.notifications.create({
+          userId: admin.id,
+          companyId: event.companyId,
+          type: NotificationEvent.SUBSCRIPTION_CANCELED,
+          title: 'Subscription Canceled',
+          body: `Your ${event.planName} plan has been canceled.`,
+          metadata: { planName: event.planName, cancelAt: event.cancelAt },
+        });
+      }
+    } catch (err) {
+      this.logger.error(
+        'onSubscriptionCanceled handler failed',
+        (err as Error).stack,
+      );
+    }
+  }
+
+  // ─── Helpers ───────────────────────────────────────────────────────────────
+
+  /**
+   * Fetches company + admin users in a single query (avoids N+1).
+   */
+  private async getCompanyWithAdmins(companyId: string) {
+    return this.prisma.company.findUnique({
+      where: { id: companyId },
+      select: {
+        name: true,
+        users: {
+          where: { role: 'ADMIN', isActive: true, deletedAt: null },
+          select: { id: true, email: true, firstName: true },
+        },
+      },
+    });
+  }
+}
