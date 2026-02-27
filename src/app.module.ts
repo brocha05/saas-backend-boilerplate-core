@@ -9,7 +9,6 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD, APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { RedisModule } from '@nestjs-modules/ioredis';
 import { EventEmitterModule } from '@nestjs/event-emitter';
-import { ScheduleModule } from '@nestjs/schedule';
 
 // Config
 import {
@@ -39,14 +38,7 @@ import { SubscriptionsModule } from './modules/subscriptions/subscriptions.modul
 import { HealthModule } from './modules/health/health.module';
 import { FilesModule } from './modules/files/files.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
-import { JobsModule } from './modules/jobs/jobs.module';
-import { ApiKeysModule } from './modules/api-keys/api-keys.module';
 import { AuditLogsModule } from './modules/audit-logs/audit-logs.module';
-import { UsageModule } from './modules/usage/usage.module';
-import { OnboardingModule } from './modules/onboarding/onboarding.module';
-import { EmailPreferencesModule } from './modules/email-preferences/email-preferences.module';
-import { UsageLimitGuard } from './modules/usage/guards/usage-limit.guard';
-import { UsageTrackingInterceptor } from './modules/usage/interceptors/usage-tracking.interceptor';
 
 @Module({
   imports: [
@@ -102,15 +94,7 @@ import { UsageTrackingInterceptor } from './modules/usage/interceptors/usage-tra
     HealthModule,
     FilesModule,
     NotificationsModule,
-    JobsModule,
-    ApiKeysModule,
     AuditLogsModule,
-    UsageModule,
-    OnboardingModule,
-    EmailPreferencesModule,
-
-    // ─── Scheduled Jobs ────────────────────────────────────────────────────────
-    ScheduleModule.forRoot(),
 
     // ─── Event Bus ────────────────────────────────────────────────────────────
     EventEmitterModule.forRoot({
@@ -123,15 +107,12 @@ import { UsageTrackingInterceptor } from './modules/usage/interceptors/usage-tra
   providers: [
     // Global rate limiting
     { provide: APP_GUARD, useClass: ThrottlerGuard },
-    { provide: APP_GUARD, useClass: UsageLimitGuard },
 
     // Global exception filter
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
 
     // Global logging interceptor
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
-    // Global usage tracking — increments metric counters after successful responses
-    { provide: APP_INTERCEPTOR, useClass: UsageTrackingInterceptor },
   ],
 })
 export class AppModule implements NestModule {

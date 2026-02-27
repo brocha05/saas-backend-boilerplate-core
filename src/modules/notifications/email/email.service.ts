@@ -13,12 +13,6 @@ export interface SendOptions {
   text?: string;
   userId?: string;
   companyId?: string;
-  /**
-   * When present the user's unsubscribe token is injected into the email footer
-   * as a one-click opt-out link (CAN-SPAM / GDPR compliance).
-   * Omit for transactional emails (password reset, security alerts).
-   */
-  unsubscribeToken?: string;
 }
 
 @Injectable()
@@ -43,23 +37,7 @@ export class EmailService {
    * Errors are swallowed — email failures never propagate to the caller.
    */
   async send(options: SendOptions): Promise<void> {
-    const { event, to, subject, html, text, userId, companyId, unsubscribeToken } = options;
-
-    // Inject unsubscribe footer for non-transactional emails
-    let finalHtml = html;
-    if (unsubscribeToken) {
-      const unsubUrl = `${this.appUrl}/settings/email-preferences?token=${unsubscribeToken}`;
-      const footer =
-        `<table width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;">` +
-        `<tr><td align="center" style="padding:16px 0;">` +
-        `<p style="color:#9ca3af;font-size:11px;margin:0;line-height:1.6;">` +
-        `You are receiving this email because you have an account with ${this.appName}.<br />` +
-        `<a href="${unsubUrl}" style="color:#9ca3af;text-decoration:underline;">Manage email preferences</a>` +
-        ` &nbsp;·&nbsp; ` +
-        `<a href="${this.appUrl}/email-preferences/unsubscribe-all/${unsubscribeToken}" style="color:#9ca3af;text-decoration:underline;">Unsubscribe from all</a>` +
-        `</p></td></tr></table>`;
-      finalHtml = html.replace('</body>', `${footer}</body>`);
-    }
+    const { event, to, subject, html, text, userId, companyId } = options;
 
     const log = await this.prisma.emailLog.create({
       data: {
@@ -73,7 +51,7 @@ export class EmailService {
     });
 
     try {
-      await this.ses.sendEmail({ to, subject, html: finalHtml, text });
+      await this.ses.sendEmail({ to, subject, html, text });
 
       await this.prisma.emailLog.update({
         where: { id: log.id },

@@ -9,7 +9,6 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
 import { StripeService } from './stripe.service';
 import { CreateSubscriptionDto } from './dto';
-import { UsageService } from '../usage/usage.service';
 import { Subscription, SubscriptionStatus } from '@prisma/client';
 import Stripe from 'stripe';
 import {
@@ -58,7 +57,6 @@ export class SubscriptionsService {
     private readonly stripe: StripeService,
     private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
-    private readonly usageService: UsageService,
   ) {}
 
   async getSubscription(companyId: string): Promise<Subscription | null> {
@@ -321,15 +319,6 @@ export class SubscriptionsService {
     });
 
     if (subscription) {
-      // Reset rate-metric counters for the new billing period (fire-and-forget)
-      this.usageService
-        .resetCurrentPeriod(subscription.companyId)
-        .catch((err: Error) =>
-          this.logger.warn(
-            `Usage reset failed for company ${subscription.companyId}: ${err.message}`,
-          ),
-        );
-
       const paidEvent = new InvoicePaidEvent();
       paidEvent.companyId = subscription.companyId;
       paidEvent.amountPaid = invoice.amount_paid ?? 0;

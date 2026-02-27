@@ -4,8 +4,6 @@ import { OnEvent } from '@nestjs/event-emitter';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { EmailService } from '../email/email.service';
 import { NotificationsService } from '../notifications.service';
-import { EmailPreferencesService } from '../../email-preferences/email-preferences.service';
-import { EmailCategory } from '../../email-preferences/email-category.constants';
 
 import {
   NotificationEvent,
@@ -38,7 +36,6 @@ export class NotificationListeners {
     private readonly email: EmailService,
     private readonly notifications: NotificationsService,
     private readonly prisma: PrismaService,
-    private readonly emailPrefs: EmailPreferencesService,
   ) {}
 
   // ─── Auth ──────────────────────────────────────────────────────────────────
@@ -129,7 +126,6 @@ export class NotificationListeners {
   @OnEvent(NotificationEvent.USER_INVITED, { async: true })
   async onUserInvited(event: UserInvitedEvent): Promise<void> {
     try {
-      // TODO: replace with a real token-based accept URL
       const acceptUrl = `${this.email.appUrl}/auth/accept-invite?company=${event.companyId}`;
 
       const template = inviteUserTemplate({
@@ -152,7 +148,6 @@ export class NotificationListeners {
   }
 
   // ─── Subscriptions ─────────────────────────────────────────────────────────
-  // All billing handlers fetch company + admins in a single query to avoid N+1.
 
   @OnEvent(NotificationEvent.SUBSCRIPTION_ACTIVATED, { async: true })
   async onSubscriptionActivated(
@@ -163,25 +158,20 @@ export class NotificationListeners {
       if (!company) return;
 
       for (const admin of company.users) {
-        const prefs = await this.emailPrefs.findOrCreate(admin.id);
+        const template = subscriptionActivatedTemplate({
+          ...this.email.baseContext(),
+          firstName: admin.firstName,
+          companyName: company.name,
+          planName: event.planName,
+        });
 
-        if (prefs.billing) {
-          const template = subscriptionActivatedTemplate({
-            ...this.email.baseContext(),
-            firstName: admin.firstName,
-            companyName: company.name,
-            planName: event.planName,
-          });
-
-          await this.email.send({
-            event: NotificationEvent.SUBSCRIPTION_ACTIVATED,
-            to: admin.email,
-            ...template,
-            userId: admin.id,
-            companyId: event.companyId,
-            unsubscribeToken: prefs.unsubscribeToken,
-          });
-        }
+        await this.email.send({
+          event: NotificationEvent.SUBSCRIPTION_ACTIVATED,
+          to: admin.email,
+          ...template,
+          userId: admin.id,
+          companyId: event.companyId,
+        });
 
         await this.notifications.create({
           userId: admin.id,
@@ -209,28 +199,23 @@ export class NotificationListeners {
       const currency = event.currency.toUpperCase();
 
       for (const admin of company.users) {
-        const prefs = await this.emailPrefs.findOrCreate(admin.id);
+        const template = invoicePaidTemplate({
+          ...this.email.baseContext(),
+          firstName: admin.firstName,
+          companyName: company.name,
+          amountPaid: event.amountPaid,
+          currency: event.currency,
+          periodEnd: event.periodEnd,
+          invoicePdfUrl: event.invoicePdfUrl,
+        });
 
-        if (prefs.billing) {
-          const template = invoicePaidTemplate({
-            ...this.email.baseContext(),
-            firstName: admin.firstName,
-            companyName: company.name,
-            amountPaid: event.amountPaid,
-            currency: event.currency,
-            periodEnd: event.periodEnd,
-            invoicePdfUrl: event.invoicePdfUrl,
-          });
-
-          await this.email.send({
-            event: NotificationEvent.INVOICE_PAID,
-            to: admin.email,
-            ...template,
-            userId: admin.id,
-            companyId: event.companyId,
-            unsubscribeToken: prefs.unsubscribeToken,
-          });
-        }
+        await this.email.send({
+          event: NotificationEvent.INVOICE_PAID,
+          to: admin.email,
+          ...template,
+          userId: admin.id,
+          companyId: event.companyId,
+        });
 
         await this.notifications.create({
           userId: admin.id,
@@ -257,28 +242,23 @@ export class NotificationListeners {
       const updatePaymentUrl = `${this.email.appUrl}/settings/billing`;
 
       for (const admin of company.users) {
-        const prefs = await this.emailPrefs.findOrCreate(admin.id);
+        const template = paymentFailedTemplate({
+          ...this.email.baseContext(),
+          firstName: admin.firstName,
+          companyName: company.name,
+          amountDue: event.amountDue,
+          currency: event.currency,
+          nextRetryAt: event.nextRetryAt,
+          updatePaymentUrl,
+        });
 
-        if (prefs.billing) {
-          const template = paymentFailedTemplate({
-            ...this.email.baseContext(),
-            firstName: admin.firstName,
-            companyName: company.name,
-            amountDue: event.amountDue,
-            currency: event.currency,
-            nextRetryAt: event.nextRetryAt,
-            updatePaymentUrl,
-          });
-
-          await this.email.send({
-            event: NotificationEvent.PAYMENT_FAILED,
-            to: admin.email,
-            ...template,
-            userId: admin.id,
-            companyId: event.companyId,
-            unsubscribeToken: prefs.unsubscribeToken,
-          });
-        }
+        await this.email.send({
+          event: NotificationEvent.PAYMENT_FAILED,
+          to: admin.email,
+          ...template,
+          userId: admin.id,
+          companyId: event.companyId,
+        });
 
         await this.notifications.create({
           userId: admin.id,
@@ -305,27 +285,22 @@ export class NotificationListeners {
       const reactivateUrl = `${this.email.appUrl}/settings/billing`;
 
       for (const admin of company.users) {
-        const prefs = await this.emailPrefs.findOrCreate(admin.id);
+        const template = subscriptionCanceledTemplate({
+          ...this.email.baseContext(),
+          firstName: admin.firstName,
+          companyName: company.name,
+          planName: event.planName,
+          cancelAt: event.cancelAt,
+          reactivateUrl,
+        });
 
-        if (prefs.billing) {
-          const template = subscriptionCanceledTemplate({
-            ...this.email.baseContext(),
-            firstName: admin.firstName,
-            companyName: company.name,
-            planName: event.planName,
-            cancelAt: event.cancelAt,
-            reactivateUrl,
-          });
-
-          await this.email.send({
-            event: NotificationEvent.SUBSCRIPTION_CANCELED,
-            to: admin.email,
-            ...template,
-            userId: admin.id,
-            companyId: event.companyId,
-            unsubscribeToken: prefs.unsubscribeToken,
-          });
-        }
+        await this.email.send({
+          event: NotificationEvent.SUBSCRIPTION_CANCELED,
+          to: admin.email,
+          ...template,
+          userId: admin.id,
+          companyId: event.companyId,
+        });
 
         await this.notifications.create({
           userId: admin.id,
@@ -346,9 +321,6 @@ export class NotificationListeners {
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
-  /**
-   * Fetches company + admin users in a single query (avoids N+1).
-   */
   private async getCompanyWithAdmins(companyId: string) {
     return this.prisma.company.findUnique({
       where: { id: companyId },

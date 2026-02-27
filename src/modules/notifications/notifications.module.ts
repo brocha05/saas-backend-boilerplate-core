@@ -2,7 +2,6 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
 import { PrismaModule } from '../../prisma/prisma.module';
-import { EmailPreferencesModule } from '../email-preferences/email-preferences.module';
 
 import { SesService } from './email/ses.service';
 import { EmailService } from './email/email.service';
@@ -11,7 +10,7 @@ import { NotificationsController } from './notifications.controller';
 import { NotificationListeners } from './events/notification.listeners';
 
 @Module({
-  imports: [PrismaModule, ConfigModule, EmailPreferencesModule],
+  imports: [PrismaModule, ConfigModule],
   controllers: [NotificationsController],
   providers: [
     SesService,

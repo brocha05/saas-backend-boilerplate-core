@@ -28,6 +28,12 @@ enum PlanInterval {
   YEAR
 }
 
+enum EmailLogStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
 // ─── Company ───────────────────────────────────────────────────────────────────
 
 model Company {
@@ -46,50 +52,45 @@ model Company {
   files            File[]
   notifications    Notification[]
   emailLogs        EmailLog[]
-  apiKeys          ApiKey[]
-  usageMeters      UsageMeter[]
-  onboardingSteps  OnboardingStep[]
 
   @@index([slug])
   @@index([deletedAt])
-  @@index([deletedAt, id]) // Soft-delete range scans
+  @@index([deletedAt, id])
   @@map("companies")
 }
 
 // ─── User ──────────────────────────────────────────────────────────────────────
 
 model User {
-  id            String    @id @default(uuid()) @db.Uuid
-  email         String    @unique
-  password      String
-  firstName     String    @map("first_name")
-  lastName      String    @map("last_name")
-  role          UserRole  @default(MEMBER)
-  isActive          Boolean   @default(true) @map("is_active")
-  emailVerified     Boolean   @default(false) @map("email_verified")
-  twoFactorEnabled  Boolean   @default(false) @map("two_factor_enabled")
-  twoFactorSecret   String?   @map("two_factor_secret") // AES-256-GCM encrypted base32 secret
-  companyId         String    @db.Uuid @map("company_id")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-  deletedAt     DateTime? @map("deleted_at")
+  id               String    @id @default(uuid()) @db.Uuid
+  email            String    @unique
+  password         String
+  firstName        String    @map("first_name")
+  lastName         String    @map("last_name")
+  role             UserRole  @default(MEMBER)
+  isActive         Boolean   @default(true) @map("is_active")
+  emailVerified    Boolean   @default(false) @map("email_verified")
+  twoFactorEnabled Boolean   @default(false) @map("two_factor_enabled")
+  twoFactorSecret  String?   @map("two_factor_secret")
+  companyId        String    @db.Uuid @map("company_id")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at")
 
-  company              Company               @relation(fields: [companyId], references: [id])
+  company              Company              @relation(fields: [companyId], references: [id])
   refreshTokens        RefreshToken[]
   passwordResetTokens  PasswordResetToken[]
   auditLogs            AuditLog[]
   files                File[]
   notifications        Notification[]
   emailLogs            EmailLog[]
-  apiKeys              ApiKey[]
-  emailPreference      EmailPreference?
   backupCodes          BackupCode[]
 
   @@index([email])
   @@index([companyId])
   @@index([deletedAt])
-  @@index([companyId, deletedAt]) // Tenant-scoped soft-delete queries
-  @@index([companyId, role])      // Role filter within a company
+  @@index([companyId, deletedAt])
+  @@index([companyId, role])
   @@map("users")
 }
 
@@ -128,14 +129,11 @@ model PasswordResetToken {
 }
 
 // ─── BackupCode ────────────────────────────────────────────────────────────────
-// Single-use MFA recovery codes generated when a user enables 2FA.
-// Stored as SHA-256(userId + ":" + normalised_code) — salted with userId to
-// prevent cross-user rainbow tables while allowing O(1) DB lookup by hash.
 
 model BackupCode {
   id        String    @id @default(uuid()) @db.Uuid
   userId    String    @db.Uuid @map("user_id")
-  codeHash  String    @map("code_hash") // SHA-256(userId:normalised_code)
+  codeHash  String    @map("code_hash")
   usedAt    DateTime? @map("used_at")
   createdAt DateTime  @default(now()) @map("created_at")
 
@@ -155,11 +153,11 @@ model Plan {
   stripePriceId   String       @unique @map("stripe_price_id")
   stripeProductId String       @map("stripe_product_id")
   interval        PlanInterval
-  price           Int          // in cents
+  price           Int
   currency        String       @default("usd")
   isActive        Boolean      @default(true) @map("is_active")
-  features        Json         @default("[]") // array of feature keys
-  limits          Json         @default("{}") // { "api_calls": 10000, "team_members": 5, "files_uploaded": 100, "storage_bytes": 1073741824 }
+  features        Json         @default("[]")
+  limits          Json         @default("{}")
   createdAt       DateTime     @default(now()) @map("created_at")
   updatedAt       DateTime     @updatedAt @map("updated_at")
 
@@ -192,19 +190,17 @@ model Subscription {
   @@index([companyId])
   @@index([status])
   @@index([stripeSubscriptionId])
-  @@index([companyId, status]) // Active subscription lookup (most common query)
+  @@index([companyId, status])
   @@map("subscriptions")
 }
 
 // ─── ProcessedStripeEvent ──────────────────────────────────────────────────────
-// Stores processed Stripe event IDs to guarantee idempotent webhook handling.
-// Stripe may deliver the same event multiple times on retries.
 
 model ProcessedStripeEvent {
-  id          String   @id @default(uuid()) @db.Uuid
-  stripeEventId String @unique @map("stripe_event_id") // e.g. "evt_1Abc..."
-  type        String   // e.g. "invoice.paid"
-  processedAt DateTime @default(now()) @map("processed_at")
+  id            String   @id @default(uuid()) @db.Uuid
+  stripeEventId String   @unique @map("stripe_event_id")
+  type          String
+  processedAt   DateTime @default(now()) @map("processed_at")
 
   @@index([processedAt])
   @@map("processed_stripe_events")
@@ -237,14 +233,14 @@ model AuditLog {
   @@map("audit_logs")
 }
 
-// ─── Notification ────────────────────────────────────────────────────────────────
+// ─── Notification ──────────────────────────────────────────────────────────────
 
 model Notification {
   id        String    @id @default(uuid()) @db.Uuid
   companyId String    @db.Uuid @map("company_id")
   userId    String    @db.Uuid @map("user_id")
 
-  type      String    // event key: "subscription.activated", "invoice.paid", etc.
+  type      String
   title     String
   body      String
   metadata  Json?
@@ -257,62 +253,53 @@ model Notification {
 
   @@index([userId, readAt])
   @@index([companyId])
-  @@index([userId, companyId, readAt]) // Unread count + per-user listing
+  @@index([userId, companyId, readAt])
   @@map("notifications")
 }
 
 // ─── EmailLog ─────────────────────────────────────────────────────────────────
 
-enum EmailLogStatus {
-  PENDING
-  SENT
-  FAILED
-}
-
 model EmailLog {
-  id         String          @id @default(uuid()) @db.Uuid
-  companyId  String?         @db.Uuid @map("company_id")
-  userId     String?         @db.Uuid @map("user_id")
+  id         String         @id @default(uuid()) @db.Uuid
+  companyId  String?        @db.Uuid @map("company_id")
+  userId     String?        @db.Uuid @map("user_id")
 
-  event      String          // same keys as NotificationEvent
+  event      String
   recipient  String
   subject    String
-  status     EmailLogStatus  @default(PENDING)
-  sentAt     DateTime?       @map("sent_at")
+  status     EmailLogStatus @default(PENDING)
+  sentAt     DateTime?      @map("sent_at")
   error      String?
 
-  createdAt  DateTime        @default(now()) @map("created_at")
+  createdAt  DateTime       @default(now()) @map("created_at")
 
-  company    Company?        @relation(fields: [companyId], references: [id])
-  user       User?           @relation(fields: [userId], references: [id])
+  company    Company?       @relation(fields: [companyId], references: [id])
+  user       User?          @relation(fields: [userId], references: [id])
 
   @@index([companyId])
   @@index([userId])
   @@index([status])
   @@index([event])
-  @@index([companyId, status]) // Failed email retry queries
+  @@index([companyId, status])
   @@map("email_logs")
 }
 
-// ─── File ───────────────────────────────────────────────────────────────────────
+// ─── File ──────────────────────────────────────────────────────────────────────
 
 model File {
   id           String    @id @default(uuid()) @db.Uuid
   companyId    String    @db.Uuid @map("company_id")
   uploadedById String    @db.Uuid @map("uploaded_by_id")
 
-  // S3 storage details
-  key          String    @unique               // S3 object key: {companyId}/{folder}/{uuid}.ext
+  key          String    @unique
   bucket       String
 
-  // File metadata
   originalName String    @map("original_name")
   mimeType     String    @map("mime_type")
-  size         Int       // size in bytes
+  size         Int
 
-  // Polymorphic association — optional link to any resource
-  resourceType String?   @map("resource_type") // e.g. "user", "company", "invoice"
-  resourceId   String?   @map("resource_id")   // UUID of the associated record
+  resourceType String?   @map("resource_type")
+  resourceId   String?   @map("resource_id")
 
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
@@ -325,102 +312,7 @@ model File {
   @@index([uploadedById])
   @@index([resourceType, resourceId])
   @@index([deletedAt])
-  @@index([companyId, deletedAt])                   // Tenant file listing
-  @@index([companyId, resourceType, resourceId])    // Resource attachment lookup
+  @@index([companyId, deletedAt])
+  @@index([companyId, resourceType, resourceId])
   @@map("files")
-}
-
-// ─── UsageMeter ─────────────────────────────────────────────────────────────
-// Stores incremental usage counters for rate-based plan limits.
-// Each row is keyed by (companyId, metric, period) where period is "YYYY-MM".
-// Gauge metrics (team_members, storage_bytes) are NOT stored here — they are
-// computed on-demand from the users/files tables.
-
-model UsageMeter {
-  id        String   @id @default(uuid()) @db.Uuid
-  companyId String   @db.Uuid @map("company_id")
-  metric    String   // e.g. "api_calls", "files_uploaded"
-  period    String   // billing period: "YYYY-MM" (e.g. "2026-02")
-  count     Int      @default(0)
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  company   Company  @relation(fields: [companyId], references: [id])
-
-  @@unique([companyId, metric, period])
-  @@index([companyId, period])
-  @@map("usage_meters")
-}
-
-// ─── EmailPreference ─────────────────────────────────────────────────────────
-// One record per user. Controls which categories of optional email they receive.
-// Transactional emails (password reset, security alerts) are always delivered
-// regardless of these settings — they have no corresponding flag here.
-// The unsubscribeToken is a cryptographically random opaque token embedded in
-// email footers so users can unsubscribe without logging in (CAN-SPAM / GDPR).
-
-model EmailPreference {
-  id               String   @id @default(uuid()) @db.Uuid
-  userId           String   @db.Uuid @unique @map("user_id")
-
-  // Optional email categories (all opt-in by default)
-  marketing        Boolean  @default(true)               // newsletters, promotions
-  productUpdates   Boolean  @default(true) @map("product_updates") // feature announcements
-  billing          Boolean  @default(true)               // invoices, payment alerts
-
-  // Opaque token for one-click unsubscribe from email links (no auth required)
-  unsubscribeToken String   @unique @map("unsubscribe_token")
-
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("email_preferences")
-}
-
-// ─── OnboardingStep ──────────────────────────────────────────────────────────
-// Tracks which onboarding steps a company has completed.
-// Auto-completed via event listeners (subscription activated, invoice paid, etc.)
-// or manually marked via PATCH /onboarding/:step.
-
-model OnboardingStep {
-  id          String   @id @default(uuid()) @db.Uuid
-  companyId   String   @db.Uuid @map("company_id")
-  step        String   // OnboardingStepKey constant
-  completedAt DateTime @default(now()) @map("completed_at")
-
-  company     Company  @relation(fields: [companyId], references: [id])
-
-  @@unique([companyId, step])
-  @@index([companyId])
-  @@map("onboarding_steps")
-}
-
-// ─── ApiKey ─────────────────────────────────────────────────────────────────
-// API keys allow programmatic/server-to-server access without a user session.
-// The raw key is shown only once at creation time; only its SHA-256 hash is stored.
-
-model ApiKey {
-  id          String    @id @default(uuid()) @db.Uuid
-  companyId   String    @db.Uuid @map("company_id")
-  createdById String    @db.Uuid @map("created_by_id")
-
-  name        String              // Human-readable label, e.g. "Production Server"
-  keyHash     String    @unique @map("key_hash")   // SHA-256(rawKey) — never the raw key
-  keyPrefix   String    @map("key_prefix")          // First ~12 chars for display (e.g. "sk_a1b2c3d4")
-  scopes      String[]  @default([])               // e.g. ["files:read", "files:write"]
-
-  expiresAt   DateTime? @map("expires_at")
-  lastUsedAt  DateTime? @map("last_used_at")
-  revokedAt   DateTime? @map("revoked_at")
-
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
-
-  company     Company   @relation(fields: [companyId], references: [id])
-  createdBy   User      @relation(fields: [createdById], references: [id])
-
-  @@index([companyId])
-  @@index([companyId, revokedAt]) // Active key listing per tenant
-  @@map("api_keys")
 }
