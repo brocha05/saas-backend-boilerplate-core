@@ -79,7 +79,7 @@ async function bootstrap(): Promise<void> {
       'X-Requested-With',
       'X-Company-Id',
       'X-Request-ID', // Allow clients to pass a trace ID for distributed tracing
-      'X-API-Key',    // API key authentication header
+      'X-API-Key', // API key authentication header
     ],
     exposedHeaders: ['X-Request-ID'], // Allow clients to read the echoed request ID
   });

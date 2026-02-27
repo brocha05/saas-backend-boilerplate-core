@@ -15,7 +15,13 @@ import { MfaTokenGuard } from './guards/mfa-token.guard';
     PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.register({}), // secrets loaded per-call from ConfigService
   ],
-  providers: [AuthService, TwoFactorService, MfaTokenGuard, JwtStrategy, JwtRefreshStrategy],
+  providers: [
+    AuthService,
+    TwoFactorService,
+    MfaTokenGuard,
+    JwtStrategy,
+    JwtRefreshStrategy,
+  ],
   controllers: [AuthController],
   exports: [AuthService, TwoFactorService, MfaTokenGuard],
 })

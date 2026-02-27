@@ -105,7 +105,8 @@ export class NotificationsService {
       throw new NotFoundException(`Notification ${id} not found`);
     }
 
-    if (notification.readAt) return NotificationResponseDto.fromEntity(notification);
+    if (notification.readAt)
+      return NotificationResponseDto.fromEntity(notification);
 
     const updated = await this.prisma.notification.update({
       where: { id },

@@ -110,9 +110,7 @@ export class AuthService {
     return { user: userWithoutPassword, company, tokens };
   }
 
-  async login(
-    dto: LoginDto,
-  ): Promise<AuthResponse | MfaRequiredResponse> {
+  async login(dto: LoginDto): Promise<AuthResponse | MfaRequiredResponse> {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
       include: { company: true },

@@ -7,8 +7,7 @@ import {
   divider,
 } from './base.template';
 
-export interface SubscriptionCanceledTemplateContext
-  extends BaseTemplateContext {
+export interface SubscriptionCanceledTemplateContext extends BaseTemplateContext {
   firstName: string;
   companyName: string;
   planName: string;

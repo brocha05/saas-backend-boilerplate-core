@@ -27,8 +27,7 @@ export class EmailService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
   ) {
-    this.appUrl =
-      this.config.get<string>('app.url') ?? 'http://localhost:3000';
+    this.appUrl = this.config.get<string>('app.url') ?? 'http://localhost:3000';
     this.appName = this.config.get<string>('app.name') ?? 'My SaaS';
   }
 

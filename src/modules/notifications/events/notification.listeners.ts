@@ -65,7 +65,10 @@ export class NotificationListeners {
         body: `Your account and company "${event.companyName}" are ready.`,
       });
     } catch (err) {
-      this.logger.error('onUserRegistered handler failed', (err as Error).stack);
+      this.logger.error(
+        'onUserRegistered handler failed',
+        (err as Error).stack,
+      );
     }
   }
 

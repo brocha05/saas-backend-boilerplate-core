@@ -34,8 +34,9 @@ export class MfaTokenGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<Request>();
 
     const authHeader = request.headers['authorization'];
-    const token =
-      authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
+    const token = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : null;
 
     if (!token) {
       throw new UnauthorizedException('MFA token required');

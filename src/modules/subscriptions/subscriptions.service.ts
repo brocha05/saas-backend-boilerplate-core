@@ -191,7 +191,9 @@ export class SubscriptionsService {
       where: { stripeEventId: event.id },
     });
     if (alreadyProcessed) {
-      this.logger.debug(`Stripe event already processed, skipping: ${event.id}`);
+      this.logger.debug(
+        `Stripe event already processed, skipping: ${event.id}`,
+      );
       return;
     }
 
@@ -294,7 +296,10 @@ export class SubscriptionsService {
     const activatedEvent = new SubscriptionActivatedEvent();
     activatedEvent.companyId = company.id;
     activatedEvent.planName = plan.name;
-    this.eventEmitter.emit(NotificationEvent.SUBSCRIPTION_ACTIVATED, activatedEvent);
+    this.eventEmitter.emit(
+      NotificationEvent.SUBSCRIPTION_ACTIVATED,
+      activatedEvent,
+    );
   }
 
   private async handleInvoicePaid(invoice: Stripe.Invoice): Promise<void> {
@@ -404,11 +409,13 @@ export class SubscriptionsService {
       const canceledEvent = new SubscriptionCanceledEvent();
       canceledEvent.companyId = subscription.companyId;
       canceledEvent.planName = (subscription as any).plan?.name ?? 'your plan';
-      canceledEvent.cancelAt =
-        stripeSubscription.cancel_at
-          ? new Date(stripeSubscription.cancel_at * 1000)
-          : new Date();
-      this.eventEmitter.emit(NotificationEvent.SUBSCRIPTION_CANCELED, canceledEvent);
+      canceledEvent.cancelAt = stripeSubscription.cancel_at
+        ? new Date(stripeSubscription.cancel_at * 1000)
+        : new Date();
+      this.eventEmitter.emit(
+        NotificationEvent.SUBSCRIPTION_CANCELED,
+        canceledEvent,
+      );
     }
   }
 
