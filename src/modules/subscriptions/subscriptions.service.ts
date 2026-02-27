@@ -7,6 +7,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CacheService } from '../../infrastructure/cache/cache.service';
 import { StripeService } from './stripe.service';
 import { CreateSubscriptionDto } from './dto';
 import { Subscription, SubscriptionStatus } from '@prisma/client';
@@ -57,6 +58,7 @@ export class SubscriptionsService {
     private readonly stripe: StripeService,
     private readonly configService: ConfigService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly cache: CacheService,
   ) {}
 
   async getSubscription(companyId: string): Promise<Subscription | null> {
@@ -65,6 +67,31 @@ export class SubscriptionsService {
       include: { plan: true },
       orderBy: { createdAt: 'desc' },
     }) as Promise<Subscription | null>;
+  }
+
+  async getPublicPlans() {
+    const cacheKey = 'plans:public';
+    const cached = await this.cache.get(cacheKey);
+    if (cached) return cached;
+
+    const plans = await this.prisma.plan.findMany({
+      where: { isActive: true },
+      orderBy: { price: 'asc' },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        stripePriceId: true,
+        interval: true,
+        price: true,
+        currency: true,
+        features: true,
+        limits: true,
+      },
+    });
+
+    await this.cache.set(cacheKey, plans, 600); // 10 minutes
+    return plans;
   }
 
   async createCheckoutSession(companyId: string, dto: CreateSubscriptionDto) {

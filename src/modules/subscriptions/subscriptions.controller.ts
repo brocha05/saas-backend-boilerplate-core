@@ -10,7 +10,7 @@ import {
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { SubscriptionsService } from './subscriptions.service';
 import { CreateSubscriptionDto } from './dto';
@@ -21,9 +21,23 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import type { JwtPayload } from '../../common/interfaces';
 
+@ApiTags('Subscriptions')
 @Controller('subscriptions')
 export class SubscriptionsController {
   constructor(private readonly subscriptionsService: SubscriptionsService) {}
+
+  // ─── Public ────────────────────────────────────────────────────────────────
+
+  @Public()
+  @Get('plans')
+  @ApiOperation({
+    summary: 'List all active pricing plans (public — no auth required)',
+  })
+  getPublicPlans() {
+    return this.subscriptionsService.getPublicPlans();
+  }
+
+  // ─── Authenticated ─────────────────────────────────────────────────────────
 
   @ApiBearerAuth('access-token')
   @UseGuards(JwtAuthGuard)
