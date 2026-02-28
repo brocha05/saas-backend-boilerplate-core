@@ -77,9 +77,7 @@ export class CompaniesService {
     return updated;
   }
 
-  async getMembers(
-    companyId: string,
-  ): Promise<Omit<User, 'password'>[]> {
+  async getMembers(companyId: string): Promise<Omit<User, 'password'>[]> {
     const users = await this.prisma.user.findMany({
       where: { companyId, deletedAt: null },
       select: {

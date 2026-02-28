@@ -1,11 +1,4 @@
-import {
-  IsString,
-  IsInt,
-  IsEnum,
-  IsOptional,
-  IsBoolean,
-  Min,
-} from 'class-validator';
+import { IsString, IsInt, IsEnum, IsOptional, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PlanInterval } from '@prisma/client';
 

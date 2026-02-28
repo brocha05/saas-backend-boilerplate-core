@@ -146,7 +146,9 @@ export class AdminService {
           cancelAtPeriodEnd: true,
           canceledAt: true,
           createdAt: true,
-          plan: { select: { name: true, slug: true, price: true, currency: true } },
+          plan: {
+            select: { name: true, slug: true, price: true, currency: true },
+          },
           company: { select: { id: true, name: true, slug: true } },
         },
       }),
